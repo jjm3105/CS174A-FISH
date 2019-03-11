@@ -838,8 +838,22 @@ class Canvas_Manager {
             live_string.onload(live_string);
         
         // Draw each registered animation.
-        for (let s of this.scene_components)
-            s.display(this.globals.graphics_state);
+        for (let s of this.scene_components){
+            //console.log(s.globals['animate']);
+            if (s.trans){
+                //Add transparency
+                this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE);
+                this.gl.enable(this.gl.BLEND);
+                this.gl.disable(this.gl.DEPTH_TEST);
+                s.display(this.globals.graphics_state);
+                this.gl.enable(this.gl.DEPTH_TEST);
+                this.gl.disable(this.gl.BLEND);
+                
+            }
+            else{
+                s.display(this.globals.graphics_state);
+            }
+        }
         
         // Now that this frame is drawn, request that render() happen 
         // again as soon as all other web page events are processed.

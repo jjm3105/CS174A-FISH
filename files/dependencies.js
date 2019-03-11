@@ -89,7 +89,7 @@ window.Basic_Shader = window.classes.Basic_Shader = class Basic_Shader extends S
 // new triangle is closer to the camera, and even if so, blending settings may interpolate some 
 // of the old color into the result.  Finally, an image is displayed onscreen.
 window.Phong_Shader = window.classes.Phong_Shader = class Phong_Shader extends Shader {
-
+    
     // Define an internal class "Material" that stores the standard settings found in Phong lighting.
     material(color, properties) {
         // Possible properties: ambient, diffusivity, specularity, smoothness, texture.
@@ -257,7 +257,6 @@ window.Phong_Shader = window.classes.Phong_Shader = class Phong_Shader extends S
 
     // Define how to synchronize our JavaScript's variables to the GPU's:
     update_GPU(g_state, model_transform, material, gpu=this.g_addrs, gl=this.gl) {
-
         // First, send the matrices to the GPU, additionally cache-ing some products of them we know we'll need:
         this.update_matrices(g_state, model_transform, gpu, gl);
         gl.uniform1f(gpu.animation_time_loc, g_state.animation_time / 1000);
@@ -368,6 +367,7 @@ window.Movement_Controls = window.classes.Movement_Controls = class Movement_Con
         canvas.addEventListener("mousedown", e=>{
             e.preventDefault();
             this.mouse.anchor = mouse_position(e);
+            onclick(this.mouse.anchor[0], this.mouse.anchor[1]);              //clicking function
         });
         canvas.addEventListener("mousemove", e=>{
             e.preventDefault();
