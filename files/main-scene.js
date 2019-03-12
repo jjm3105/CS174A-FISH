@@ -1,23 +1,82 @@
-var trackobject = 0;
-var object_x_WCS = [0.0]; //default with origin
-var object_y_WCS = [0.0]; //default with origin
-var object_z_WCS = [0];
 
-function onclick(screen_x, screen_y){
-    //trackobject++;
-    console.log(screen_x);
-    x = Math.random() * 8;
-    y = Math.random() * 8;
-    z = 0;
+// Variables for Camera
+var tracking = false;
+var camera_once = false;
 
-    // Have push x/(some function of camera position)
-    // Have push y/-(some^ function of camera position)
-    object_x_WCS.push(x);
-    object_y_WCS.push(y);
-    object_z_WCS.push(z);
+// Returns position vector from Mat4
+function retVector(model_transform) {
+    return Vec.of(model_transform[0][3], model_transform[1][3], model_transform[2][3]);
 }
 
-class Assignment_Two_Skeleton extends Scene_Component {
+
+
+
+/* MOVEMENT */
+
+var setup_first_once_m_fish = false;
+let m_origin = Mat4.identity();
+var m_fish = m_origin.times(Mat4.translation(Vec.of(0, start_height, 0)));
+
+// bezier curve movement values
+var m_old_pos = m_origin;
+var m_goal_pos = m_origin;
+var goal_direction = Vec.of(1, 0, 0);
+var move_start_time = 0;
+var pos_in_curve = 0;
+
+// state bools
+var fish_idle = false;
+var fish_moving = true;
+var food_found = false;
+
+// instantaneous bools
+var fish_start_moving = false;
+
+// speed values
+var drop_speed = 0.01;
+var swim_speed = 1/1.2;
+var paddle_speed = 15;
+const low_speed = 5;
+const med_speed = 25;
+const high_speed = 30;
+
+
+// position values
+var fish_size = 0.5;
+var start_height = 0;
+
+
+
+
+
+
+
+
+/* MOUSE CLICK */
+
+var trackobject = 0;
+var object_x_WCS = []; //default with origin
+var object_y_WCS = []; //default with origin
+var object_z_WCS = [];
+
+function onclick(screen_x, screen_y){
+//     trackobject++;
+//     console.log(screen_x);
+// //     x = Math.random() * 8;
+// //     y = Math.random() * 8;
+//     z = 0;
+//     object_x_WCS.push(screen_x/15);
+//     object_y_WCS.push(screen_y/-15);
+//     object_z_WCS.push(z);
+}
+
+
+
+
+
+/* MAIN SCENE */
+
+class Fish_Are_Friends extends Scene_Component {
     // The scene begins by requesting the camera, shapes, and materials it will need.
     constructor(context, control_box) {
         super(context, control_box);
@@ -48,20 +107,27 @@ class Assignment_Two_Skeleton extends Scene_Component {
             'cylinder': new Cylinder(15),
             'cone': new Cone(20),
             'ball': new Subdivision_Sphere(4),
-            'tailfin': new tailfin()    ////////////////////////////Create tailfin shape in here
+
+            'body': new Body(),
+            'end1': new End1(),
+            'end2': new End2(),
+            'end3': new End3(),
+            'tail': new Tail(),
+            'eyes': new Eye()
         }
         this.submit_shapes(context, shapes);
         this.shape_count = Object.keys(shapes).length;
         
         //this.MeshBasicMaterial( { side:THREE.BackSide,map:texture, depthWrite: false, depthTest: false });
 
+        /* PROVIDED TEXTURES */
+
         // Make some Material objects available to you:
         this.test = context.get_instance(Phong_Shader).material(Color.of(.9, .5, .9, 1), {
-            ambient: 0.4, //how might light goes through it
-            diffusivity: .4, //brightness facing light i think
-            //specularity: 0 // l -> r gradient
+            ambient: 0.4,       //how might light goes through it
+            diffusivity: .4,    //brightness facing light i think
+            //specularity: 0    // l -> r gradient
         });
-        
 
 		this.clay = context.get_instance(Phong_Shader2).material(Color.of(.2, .5, .1, 1), {
             ambient: .4,
@@ -79,45 +145,87 @@ class Assignment_Two_Skeleton extends Scene_Component {
             specularity: 0.3
         });
 
-        // Load some textures for the demo shapes
+        /* TEXTURES */
+        
         this.shape_materials = {};
         const shape_textures = {
-            square: "assets/even-dice-cubemap.png",
-            box: "assets/even-dice-cubemap.png",
-            ball: "assets/soccer_sph_s_resize.png",
-            cylinder: "assets/treebark.png",
-            pyramid: "assets/tetrahedron-texture2.png",
-            simplebox: "assets/tetrahedron-texture2.png",
-            cone: "assets/hypnosis.jpg",
-            circle: "assets/hypnosis.jpg",
-            tailfin: "assets/fish2.jpg",    //Location of tailfin texture
+
+            // TABLE
+            table: "assets/table.png",
+            
+            // FISH
+            scales: "assets/scales/scales.jpg",
+            body: "assets/scales/scales_body.jpg",
+            end: "assets/scales/scales_end.jpg",
+            tail: "assets/scales/scales_tail.jpg",
+            eyes: "assets/eyes/eyes.png",
+
+            // FISHFOOD
             fishfood:  "assets/fishfood.png"
         };
         for (let t in shape_textures)
             this.shape_materials[t] = this.texture_base.override({
                 texture: context.get_instance(shape_textures[t])
             });
-        
+
+        // COLORS
+        this.red = Color.of(1, 0, 0, 1);
+        this.yellow = Color.of(1, 1, 0, 1);
+        this.blue = Color.of(0, 0, 1, 1);
+        this.green = Color.of(0, 1, 0, 1);
+        this.aqua = Color.of(0.2, 0.8, 1, 1);
+        this.leaf = Color.of(0.55, 0.8, 0, 1);
+        this.dark_leaf = Color.of(0.22, 0.4, 0, 1);
+        this.brown = Color.of(0.3, 0.3, 0.3, 1);
+        this.orange = Color.of(1, 0.5, 0, 1);
+
+        /* OTHER */
+
+        // LIGHT
         this.lights = [new Light(Vec.of(10, 10, 20, 1), Color.of(1, .4, 1, 1), 100000)];
 
+        // TIME
         this.t = 0;
     }
 
+
+
+
+
+    /* UNDER THE HOOD */
+
+    // lookAtMatrix
+    cameratrack(graphics_state, model_transform) {
+        var object = retVector(model_transform);
+        var position = object.plus(Vec.of(0, 0, fish_size*15));
+
+        graphics_state.camera_transform = Mat4.look_at(position, object, Vec.of(0, 1, 0));
+    }
+
+    // Default position of camera
+    cameraorigin(graphics_state) {
+        var object = Vec.of(0, 0, 0);
+        var position = Vec.of(0, 0, 35);
+
+        graphics_state.camera_transform = Mat4.look_at(position, object, Vec.of(0, 1, 0));
+        camera_once = false;
+    }
 
     // Draw the scene's buttons, setup their actions and keyboard shortcuts, and monitor live measurements.
     make_control_panel() {
         this.key_triggered_button("Pause Time", ["n"], () => {
             this.paused = !this.paused;
         });
+
+        this.key_triggered_button("Follow Fish", ["q"], () => {
+            if (!camera_once && tracking) {
+                camera_once = true;
+            }
+            tracking = !tracking;
+        });
     }
 
-    draw_legs(graphics_state, model_transform, x, y){
-         this.shapes['box'].draw(
-               graphics_state,
-               model_transform.times(Mat4.translation([9 * x, 0, 4 * y])).times(Mat4.scale([1,10,1])),
-               this.shape_materials['cylinder']);
-    }
-
+    // Mouse click
     detectLeftButton(evt) {
         evt = evt || window.event;
         if ("buttons" in evt) {
@@ -127,6 +235,12 @@ class Assignment_Two_Skeleton extends Scene_Component {
         return button == 1;
     }
 
+
+
+
+    
+    /* DISPLAY */
+
     display(graphics_state) {
         // Use the lights stored in this.lights.
         graphics_state.lights = this.lights;
@@ -135,22 +249,198 @@ class Assignment_Two_Skeleton extends Scene_Component {
         if (!this.paused)
             this.t += graphics_state.animation_delta_time / 1000;
         const t = this.t;
-
-        let center = Mat4.identity();
         
+        
+        
+        // TABLE
+        
+        const table_height = 3;
+        const table_width = 9;
+        const table_length = 4;
+        const table_scale = 1.2;
+        const table_pos = -6;
+        this.table(graphics_state, m_origin, table_pos, table_height, table_width, table_length, table_scale);
+
+        // FOOD
+
+        this.food(graphics_state, m_origin);
+
+        // FISH
+        
+        start_height = 7 + table_scale*table_pos;
+        let center = m_origin.times(Mat4.translation(Vec.of(0, start_height, 0)));
+        
+        if (!setup_first_once_m_fish) {
+            m_fish = center;
+            setup_first_once_m_fish = true;
+        }
+
+        if (food_found) {
+            this.food_found();
+        }
+        else {
+            if (t % 10 < 0.1) {
+                this.new_goal(center);
+                fish_moving = true;
+            }
+
+            else if (fish_moving) {
+                goal_direction = retVector(m_goal_pos).minus(retVector(m_old_pos));
+                m_fish = this.move_movement(center, t);
+            }
+            else {
+                this.idle_movement(t);
+            }
+        }        
+
+        let m_final = this.align_direction(t);
+        this.fish(graphics_state, m_final, t, fish_size, paddle_speed, false);
+
+        // CAMERA TRACKING
+
+        if (tracking) {
+            this.cameratrack(graphics_state, m_fish);
+        }
+        if (camera_once)
+            this.cameraorigin(graphics_state);
+    }
+
+
+
+
+
+    /* MOVEMENT */
+
+    idle_movement(t) {
+        
+        m_fish = m_fish.times(Mat4.translation(Vec.of(0, -1*drop_speed, 0)));
+
+        if (retVector(m_fish)[1] < -4) {
+            if (t % 2 <= 1)
+                m_fish = m_fish.times(Mat4.translation(Vec.of(0, drop_speed, 0)));
+            else
+                m_fish = m_fish.times(Mat4.translation(Vec.of(0, -1*drop_speed, 0)));
+        }
+        
+        m_old_pos = m_fish;
+        paddle_speed = low_speed;
+    }
+
+    move_movement(model_transform, t) {
+        if (!fish_start_moving) {
+            fish_start_moving = true;
+            move_start_time = t;
+        }
+
+        var local_time = t - move_start_time;
+        pos_in_curve = 1 - 0.5*(Math.cos(local_time*swim_speed) + 1);
+        var m_midpoint = this.calculate_mid(m_old_pos, m_goal_pos);
+
+        var P0 = retVector(m_old_pos);
+        var P1 = retVector(m_midpoint);
+        var P2 = retVector(m_goal_pos);
+
+        let A_pos = P0.times(1-pos_in_curve).plus(P1.times(pos_in_curve));
+        let B_pos = P1.times(1-pos_in_curve).plus(P2.times(pos_in_curve));
+
+        let next_pos = A_pos.times(1-pos_in_curve).plus(B_pos.times(pos_in_curve));
+
+        if (pos_in_curve >= 0.95) {
+            fish_moving = false;
+            fish_start_moving = false;
+            m_old_pos = m_goal_pos;
+        }
+
+        return model_transform.times(Mat4.translation(next_pos));
+    }
+
+    new_goal(model_transform) {
+        var new_x = (Math.random() - 0.5) * 9.5;
+        var new_y = (Math.random() - 0.5) * 6.5;
+        var new_z = (Math.random() - 0.5) * 4.5;
+
+        m_goal_pos = model_transform.times(Mat4.translation(Vec.of(new_x, new_y, new_z)));
+        paddle_speed = med_speed;
+    }
+
+    calculate_mid() {
+        let vec_p = retVector(m_old_pos);
+        let vec_n = retVector(m_goal_pos);
+
+        return m_origin.times(Mat4.translation(Vec.of(vec_p[0], vec_n[1], vec_p[2])));
+    }
+
+    align_direction(t) {
+        var local_time = t - move_start_time;
+        let deg_direction = 0;
+        let deg_direction2 = 0.5 * Math.PI/2 * (1 - pos_in_curve);
+
+        if (goal_direction[0] > 0) {
+            deg_direction = Math.atan(-goal_direction[2]/goal_direction[0]);
+        }
+        else if (goal_direction[0] == 0) {
+            deg_direction = 0;
+        }
+        else {
+            deg_direction = Math.PI + Math.atan(goal_direction[2]/-goal_direction[0]);
+        }
+
+        if (goal_direction[1] < 0)
+            deg_direction2 = deg_direction2 * -1;
+
+        return m_fish.times(Mat4.rotation(deg_direction, Vec.of(0, 1, 0)))
+                    .times(Mat4.rotation(deg_direction2, Vec.of(0, 0, 1)));
+        
+    }
+
+    facing_right() {
+        return goal_direction[0] >= 0 ? true : false;
+    }
+
+    food_found() {
+        // since you're interrupting normal movement behavior here,
+        // make sure to update old_pos here
+    }
+
+
+
+
+
+
+
+    /* OBJECTS */
+
+    table(graphics_state, model_transform, pos, height, width, length, scale) {
+
+        let m = model_transform.times(Mat4.scale([scale, scale, scale]))
+                                .times(Mat4.translation([0, pos, 0]));
+
         //legs
-        this.draw_legs(graphics_state, center, 1, 1);
-        this.draw_legs(graphics_state, center, 1, -1);
-        this.draw_legs(graphics_state, center, -1, 1);
-        this.draw_legs(graphics_state, center, -1,-1);
+        this.draw_legs(graphics_state, m, 1, 1, height, width, length, scale);
+        this.draw_legs(graphics_state, m, 1, -1, height, width, length, scale);
+        this.draw_legs(graphics_state, m, -1, 1, height, width, length, scale);
+        this.draw_legs(graphics_state, m, -1, -1, height, width, length, scale);
 
         //tabletop
         this.shapes['box'].draw(
             graphics_state, 
-            center.times(Mat4.translation([0,10 + 0.5,0])).times(Mat4.scale([10, 0.5,5])),
-            this.shape_materials['cylinder']
+            m.times(Mat4.scale([width, 1, length])),
+            this.shape_materials['table']
            // this.clay
         )
+    }
+
+    draw_legs(graphics_state, model_transform, x, y, height, width, length, scale){
+
+         this.shapes['box'].draw(
+               graphics_state,
+               model_transform.times(Mat4.translation([x*(width-1.2), -height-0.2, y*(length-1.2)]))
+                                .times(Mat4.scale([1, height, 1])),
+               this.shape_materials['table']);
+    }
+
+
+    food(graphics_state, model_transform) {
 
         ////////////////////////draw all objects, their coordinates are stored in the global variables on the top of this file
         var i;
@@ -164,400 +454,111 @@ class Assignment_Two_Skeleton extends Scene_Component {
                 this.shape_materials["fishfood"] || this.plastic
            );
         }
-        
-        this.shapes.tailfin.draw(
-            graphics_state,
-            center.times(Mat4.translation(Vec.of(5,15,0))),
-            this.shape_materials["tailfin"] || this.plastic
-         );
-
-/* 
-        //test obj for transparency
-        this.shapes['box'].draw(
-            graphics_state, 
-            center.times(Mat4.translation([0,11 + 5 ,0])).times(Mat4.scale([2, 2,2])),
-            this.shape_materials['cylinder']
-        )
-
-       
-        this.shapes['box'].draw(
-            graphics_state, 
-            center.times(Mat4.translation([0 ,0 ,0])),
-            this.shape_materials['cylinder']
-        )
-
-        this.shapes['box'].draw(
-            graphics_state, 
-            center.times(Mat4.translation([0,11 + 5 ,0])).times(Mat4.scale([10, 5,5])),
-            this.clay
-        )
-
-*/
-    }
-}
-
-window.Assignment_Two_Skeleton = window.classes.Assignment_Two_Skeleton = Assignment_Two_Skeleton;
-
-class test extends Scene_Component {
-    // The scene begins by requesting the camera, shapes, and materials it will need.
-    constructor(context, control_box) {
-        super(context, control_box);
-
-        // First, include a secondary Scene that provides movement controls:
-        if(!context.globals.has_controls)
-            context.register_scene_component(new Movement_Controls(context, control_box.parentElement.insertCell()));
-
-        // Locate the camera here (inverted matrix).
-        const r = context.width / context.height;
-        context.globals.graphics_state.camera_transform = Mat4.translation([0, 0, -35]);
-        context.globals.graphics_state.projection_transform = Mat4.perspective(Math.PI / 4, r, .1, 1000);
-        this.trans = true;
-        // At the beginning of our program, load one of each of these shape
-        // definitions onto the GPU.  NOTE:  Only do this ONCE per shape
-        // design.  Once you've told the GPU what the design of a cube is,
-        // it would be redundant to tell it again.  You should just re-use
-        // the one called "box" more than once in display() to draw
-        // multiple cubes.  Don't define more than one blueprint for the
-        // same thing here.
-        const shapes = {
-            'square': new Square(),
-            'circle': new Circle(15),
-            'pyramid': new Tetrahedron(false),
-            'simplebox': new SimpleCube(),
-            'box': new Cube(),
-            'cylinder': new Cylinder(15),
-            'cone': new Cone(20),
-            'ball': new Subdivision_Sphere(4)
-        }
-        this.submit_shapes(context, shapes);
-        this.shape_count = Object.keys(shapes).length;
-        
-        //this.MeshBasicMaterial( { side:THREE.BackSide,map:texture, depthWrite: false, depthTest: false });
-
-        // Make some Material objects available to you:
-        this.test = context.get_instance(Phong_Shader).material(Color.of(.9, .5, .9, 1), {
-            ambient: 0.4, //how might light goes through it
-            diffusivity: .4, //brightness facing light i think
-            //specularity: 0 // l -> r gradient
-        });
-        
-
-		this.clay = context.get_instance(Phong_Shader2).material(Color.of(.2, .5, .1, 1), {
-            ambient: .4,
-            diffusivity: .4,
-            depthTest: false
-        });
-        
-        this.plastic = this.clay.override({
-            specularity: .6
-        });
-
-        this.texture_base = context.get_instance(Phong_Shader).material(Color.of(0, 0, 0, 1), {
-            ambient: 1,
-            diffusivity: 0.4,
-            specularity: 0.3
-        });
-
-        // Load some textures for the demo shapes
-        this.shape_materials = {};
-        const shape_textures = {
-            square: "assets/even-dice-cubemap.png",
-            box: "assets/even-dice-cubemap.png",
-            ball: "assets/glass.png",
-            cylinder: "assets/treebark.png",
-            pyramid: "assets/tetrahedron-texture2.png",
-            simplebox: "assets/tetrahedron-texture2.png",
-            cone: "assets/hypnosis.jpg",
-            circle: "assets/hypnosis.jpg"
-        };
-        for (let t in shape_textures)
-            this.shape_materials[t] = this.texture_base.override({
-                texture: context.get_instance(shape_textures[t])
-            });
-        
-        this.lights = [new Light(Vec.of(10, 10, 20, 1), Color.of(1, .4, 1, 1), 100000)];
-
-        this.t = 0;
     }
 
 
-    // Draw the scene's buttons, setup their actions and keyboard shortcuts, and monitor live measurements.
-    make_control_panel() {
-        this.key_triggered_button("Pause Time", ["n"], () => {
-            this.paused = !this.paused;
-        });
-    }
+    fish(graphics_state, model_transform, t, size, speed, special) {
 
-    draw_legs(graphics_state, model_transform, x, y){
-         this.shapes['box'].draw(
-               graphics_state,
-               model_transform.times(Mat4.translation([9 * x, 0, 4 * y])).times(Mat4.scale([1,10,1])),
-               //model_transform.times(Mat4.scale([2,10,2])),
-               this.shape_materials['cylinder']);
-    }
+        const deg_body = -0.05*(Math.sin(speed*t));
+        const deg_tail = 0.2*(Math.sin(speed*t));
+        let eye_size = 0.12;
 
-    display(graphics_state) {
-        // Use the lights stored in this.lights.
-        graphics_state.lights = this.lights;
-        
-        // Find how much time has passed in seconds, and use that to place shapes.
-        if (!this.paused)
-            this.t += graphics_state.animation_delta_time / 1000;
-        const t = this.t;
+        let m_body = model_transform.times(Mat4.rotation(Math.PI/2, Vec.of(0, 1, 0)))
+                            .times(Mat4.scale(Vec.of(size, size, size)))
+                            .times(Mat4.rotation(Math.PI/2 + deg_body, Vec.of(0, 1, 0)))
+                            .times(Mat4.scale(Vec.of(1.4, 1, 0.8)))
+                            .times(Mat4.rotation(-Math.PI/2, Vec.of(0, 1, 0)));
+
+        let m_end1 = m_body.times(Mat4.rotation(-Math.PI/2, Vec.of(0, 0, 1)))     // To hide the texture lol
+                            .times(Mat4.scale(Vec.of(1, 1, 0.45)))
+                            .times(Mat4.translation(Vec.of(0, 0, -1.2)));
+
+        let m_end2 = m_end1.times(Mat4.translation(Vec.of(0, 0, -0.935)));
+
+        let m_end3 = m_end2.times(Mat4.rotation(Math.PI/2, Vec.of(0, 0, 1)))     // To hide the texture lol
+                            .times(Mat4.translation(Vec.of(0, 0, -0.2)));
+
+        let m_tail = m_end3.times(Mat4.translation(Vec.of(0, 0, -0.1)))
+                            .times(Mat4.rotation(Math.PI/2, Vec.of(0, 1, 0)))
+                            .times(Mat4.rotation(Math.PI/2, Vec.of(0, 0, 1)))
+                            .times(Mat4.rotation(deg_tail, Vec.of(1, 0, 0)))
+                            .times(Mat4.scale(Vec.of(1, 0.9, 1)))
+                            .times(Mat4.translation(Vec.of(0, -1.2, 0)));
+
+        let m_eye = m_body.times(Mat4.translation(Vec.of(0, 0, 0.7)))
+                            .times(Mat4.rotation(-Math.PI/2, Vec.of(0, 1, 0)))
+                            .times(Mat4.scale(Vec.of(1/1.4, 1, 1/0.8)))
+                            .times(Mat4.translation(Vec.of(0, 0.45, 0)));
+        let m_eye1 = m_eye.times(Mat4.translation(Vec.of(0, 0, 0.5)))
+                            .times(Mat4.rotation(-0.55*Math.PI/2, Vec.of(0, 1, 0)))
+                            .times(Mat4.scale(Vec.of(0.8*eye_size, eye_size, eye_size)));
+        let m_eye2 = m_eye.times(Mat4.translation(Vec.of(0, 0, -0.5)))
+                            .times(Mat4.rotation(0.55*Math.PI/2, Vec.of(0, 1, 0)))
+                            .times(Mat4.scale(Vec.of(0.8*eye_size, eye_size, eye_size)));
 
 
-        let center = Mat4.identity();
 
-        this.shapes['box'].draw(
-            graphics_state, 
-            center.times(Mat4.translation([0,11 + 5 ,0])).times(Mat4.scale([10, 5,5])),
-            this.shape_materials['ball']
-        )
-    }
-}
-
-window.test = window.classes.test = test;
-
-
-//*******************************PHONG2
-window.Phong_Shader2 = window.classes.Phong_Shader2 = class Phong_Shader2 extends Shader {
-    
-    // Define an internal class "Material" that stores the standard settings found in Phong lighting.
-    material(color, properties) {
-        // Possible properties: ambient, diffusivity, specularity, smoothness, texture.
-        return new class Material {
-            constructor(shader, color=Color.of(0, 0, 0, 1), ambient=0, diffusivity=1, specularity=1, smoothness=40) {
-                // Assign defaults.
-                Object.assign(this, {
-                    shader,
-                    color,
-                    ambient,
-                    diffusivity,
-                    specularity,
-                    smoothness
-                });
-
-                // Optionally override defaults.
-                Object.assign(this, properties);
-            }
-
-            // Easily make temporary overridden versions of a base material, such as
-            // of a different color or diffusivity.  Use "opacity" to override only that.
-            override(properties) {
-                const copied = new this.constructor();
-                Object.assign(copied, this);
-                Object.assign(copied, properties);
-                copied.color = copied.color.copy();
-                if (properties["opacity"] != undefined)
-                    copied.color[3] = properties["opacity"];
-                return copied;
-            }
-        }
-        (this,color);
-    }
-
-    // We'll pull single entries out per vertex by field name.  Map
-    // those names onto the vertex array names we'll pull them from.
-    map_attribute_name_to_buffer_name(name) {
-        // Use a simple lookup table.
-        return {
-            object_space_pos: "positions",
-            normal: "normals",
-            tex_coord: "texture_coords"
-        }[name];
-    }
-    
-    // ********* SHARED CODE, INCLUDED IN BOTH SHADERS *********
-    shared_glsl_code() 
-    {
-        return `
-            precision mediump float;
-
-            // We're limited to only so many inputs in hardware.  Lights are costly (lots of sub-values).
-            const int N_LIGHTS = 2;
-            uniform float ambient, diffusivity, specularity, smoothness, animation_time, attenuation_factor[N_LIGHTS];
-
-            // Flags for alternate shading methods
-            uniform bool GOURAUD, COLOR_NORMALS, USE_TEXTURE;
-            uniform vec4 lightPosition[N_LIGHTS], lightColor[N_LIGHTS], shapeColor;
-            
-            // Specifier "varying" means a variable's final value will be passed from the vertex shader
-            // on to the next phase (fragment shader), then interpolated per-fragment, weighted by the 
-            // pixel fragment's proximity to each of the 3 vertices (barycentric interpolation).       
-            varying vec3 N, E;                     
-            varying vec2 f_tex_coord;             
-            varying vec4 VERTEX_COLOR;            
-            varying vec3 L[N_LIGHTS];
-            varying float dist[N_LIGHTS];
-
-            vec3 phong_model_lights( vec3 N ) {
-                vec3 result = vec3(0.0);
-                for(int i = 0; i < N_LIGHTS; i++) {
-                    vec3 H = normalize( L[i] + E );
-                    
-                    float attenuation_multiplier = 1.0;// / (1.0 + attenuation_factor[i] * (dist[i] * dist[i]));
-                    float diffuse  =      max( dot(N, L[i]), 0.0 );
-                    float specular = pow( max( dot(N, H), 0.0 ), smoothness );
-
-                    result += attenuation_multiplier * ( shapeColor.xyz * diffusivity * diffuse + lightColor[i].xyz * specularity * specular );
-                }
-                return result;
-            }`;
-    }
-
-    // ********* VERTEX SHADER *********
-    vertex_glsl_code() {
-        return `
-            attribute vec3 object_space_pos, normal;
-            attribute vec2 tex_coord;
-
-            uniform mat4 camera_transform, camera_model_transform, projection_camera_model_transform;
-            uniform mat3 inverse_transpose_modelview;
-
-            void main() {
-                // The vertex's final resting place (in NDCS).
-                gl_Position = projection_camera_model_transform * vec4(object_space_pos, 1.0);
-                
-                // The final normal vector in screen space.
-                N = normalize( inverse_transpose_modelview * normal );
-                
-                // Directly use original texture coords and interpolate between.
-                f_tex_coord = tex_coord;
-
-                // Bypass all lighting code if we're lighting up vertices some other way.
-                if( COLOR_NORMALS ) {
-                    // In "normals" mode, rgb color = xyz quantity. Flash if it's negative.
-                    VERTEX_COLOR = vec4( N[0] > 0.0 ? N[0] : sin( animation_time * 3.0   ) * -N[0],             
-                                         N[1] > 0.0 ? N[1] : sin( animation_time * 15.0  ) * -N[1],
-                                         N[2] > 0.0 ? N[2] : sin( animation_time * 45.0  ) * -N[2] , 1.0 );
-                    return;
-                }
-                
-                // The rest of this shader calculates some quantities that the Fragment shader will need:
-                vec3 camera_space_pos = ( camera_model_transform * vec4(object_space_pos, 1.0) ).xyz;
-                E = normalize( -camera_space_pos );
-
-                // Light positions use homogeneous coords.  Use w = 0 for a directional light source -- a vector instead of a point.
-                for( int i = 0; i < N_LIGHTS; i++ ) {
-                    L[i] = normalize( ( camera_transform * lightPosition[i] ).xyz - lightPosition[i].w * camera_space_pos );
-
-                    // Is it a point light source?  Calculate the distance to it from the object.  Otherwise use some arbitrary distance.
-                    dist[i]  = lightPosition[i].w > 0.0 ? distance((camera_transform * lightPosition[i]).xyz, camera_space_pos)
-                                                        : distance( attenuation_factor[i] * -lightPosition[i].xyz, object_space_pos.xyz );
-                }
-
-                // Gouraud shading mode?  If so, finalize the whole color calculation here in the vertex shader,
-                // one per vertex, before we even break it down to pixels in the fragment shader.   As opposed 
-                // to Smooth "Phong" Shading, where we *do* wait to calculate final color until the next shader.
-                if( GOURAUD ) {
-                    VERTEX_COLOR      = vec4( shapeColor.xyz * ambient, shapeColor.w);
-                    VERTEX_COLOR.xyz += phong_model_lights( N );
-                }
-            }`;
-    }
-
-    // ********* FRAGMENT SHADER *********
-    // A fragment is a pixel that's overlapped by the current triangle.
-    // Fragments affect the final image or get discarded due to depth.
-    fragment_glsl_code() {
-        return `
-            uniform sampler2D texture;
-
-            void main() {
-                // Do smooth "Phong" shading unless options like "Gouraud mode" are wanted instead.
-                // Otherwise, we already have final colors to smear (interpolate) across vertices.
-                if( GOURAUD || COLOR_NORMALS ) {
-                    gl_FragColor = VERTEX_COLOR;
-                    return;
-                }                                 
-                // If we get this far, calculate Smooth "Phong" Shading as opposed to Gouraud Shading.
-                // Phong shading is not to be confused with the Phong Reflection Model.
-
-                // Sample the texture image in the correct place.
-                vec4 tex_color = texture2D( texture, f_tex_coord );                    
-
-                // Compute an initial (ambient) color:
-                if( USE_TEXTURE )
-                    gl_FragColor = vec4( ( tex_color.xyz + shapeColor.xyz ) * ambient, shapeColor.w * tex_color.w ); 
-                else
-                    gl_FragColor = vec4( shapeColor.xyz * ambient, shapeColor.w );
-                
-                // Compute the final color with contributions from lights.
-                gl_FragColor.xyz += phong_model_lights( N );
-            }`;
-    }
-
-    // Define how to synchronize our JavaScript's variables to the GPU's:
-    update_GPU(g_state, model_transform, material, gpu=this.g_addrs, gl=this.gl) {
-        // First, send the matrices to the GPU, additionally cache-ing some products of them we know we'll need:
-        this.update_matrices(g_state, model_transform, gpu, gl);
-        gl.uniform1f(gpu.animation_time_loc, g_state.animation_time / 1000);
-		
-		/*
-		//Add transparency
-        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-        gl.enable(gl.BLEND);
-        gl.disable(gl.DEPTH_TEST);
-		*/
-
-        if (g_state.gouraud === undefined) {
-            g_state.gouraud = g_state.color_normals = false;
-        }
-
-        // Keep the flags seen by the shader program up-to-date and make sure they are declared.
-        gl.uniform1i(gpu.GOURAUD_loc, g_state.gouraud);
-        gl.uniform1i(gpu.COLOR_NORMALS_loc, g_state.color_normals);
-
-        // Send the desired shape-wide material qualities to the graphics card, where they will
-        // tweak the Phong lighting formula.
-        gl.uniform4fv(gpu.shapeColor_loc,  material.color);
-        gl.uniform1f( gpu.ambient_loc,     material.ambient);
-        gl.uniform1f( gpu.diffusivity_loc, material.diffusivity);
-        gl.uniform1f( gpu.specularity_loc, material.specularity);
-        gl.uniform1f( gpu.smoothness_loc,  material.smoothness);
-
-        // NOTE: To signal not to draw a texture, omit the texture parameter from Materials.
-        if (material.texture) {
-            gpu.shader_attributes["tex_coord"].enabled = true;
-            gl.uniform1f(gpu.USE_TEXTURE_loc, 1);
-            gl.bindTexture(gl.TEXTURE_2D, material.texture.id);
+        if (special) {
+            this.shapes['body'].draw(
+                   graphics_state,
+                   m_body,
+                   this.shape_materials["body"]);
+            this.shapes['end1'].draw(
+                   graphics_state,
+                   m_end1,
+                   this.shape_materials["end"]);
+            this.shapes['end2'].draw(
+                   graphics_state,
+                   m_end2,
+                   this.shape_materials["end"]);
+            this.shapes['end3'].draw(
+                   graphics_state,
+                   m_end3,
+                   this.shape_materials["scales"]);
+            this.shapes['tail'].draw(
+                   graphics_state,
+                   m_tail,
+                   this.shape_materials["tail"]);
+            this.shapes['eyes'].draw(
+                   graphics_state,
+                   m_eye1,
+                   this.shape_materials["eyes"]);
+            this.shapes['eyes'].draw(
+                   graphics_state,
+                   m_eye2,
+                   this.shape_materials["eyes"]);
         }
         else {
-            gl.uniform1f(gpu.USE_TEXTURE_loc, 0);
-            gpu.shader_attributes["tex_coord"].enabled = false;
+            this.shapes['body'].draw(
+                   graphics_state,
+                   m_body,
+                   this.plastic.override({color: this.orange}));
+            this.shapes['end1'].draw(
+                   graphics_state,
+                   m_end1,
+                   this.plastic.override({color: this.orange}));
+            this.shapes['end2'].draw(
+                   graphics_state,
+                   m_end2,
+                   this.plastic.override({color: this.orange}));
+            this.shapes['end3'].draw(
+                   graphics_state,
+                   m_end3,
+                   this.plastic.override({color: this.orange}));
+            this.shapes['tail'].draw(
+                   graphics_state,
+                   m_tail,
+                   this.plastic.override({color: this.orange}));
+            this.shapes['eyes'].draw(
+                   graphics_state,
+                   m_eye1,
+                   this.shape_materials["eyes"]);
+            this.shapes['eyes'].draw(
+                   graphics_state,
+                   m_eye2,
+                   this.shape_materials["eyes"]);
         }
-
-        if (!g_state.lights.length)
-            return;
-        var lightPositions_flattened = [],
-            lightColors_flattened = [],
-            lightAttenuations_flattened = [];
-        for (var i = 0; i < 4 * g_state.lights.length; i++) {
-            lightPositions_flattened.push(g_state.lights[Math.floor(i / 4)].position[i % 4]);
-            lightColors_flattened.push(g_state.lights[Math.floor(i / 4)].color[i % 4]);
-            lightAttenuations_flattened[Math.floor(i / 4)] = g_state.lights[Math.floor(i / 4)].attenuation;
-        }
-        gl.uniform4fv(gpu.lightPosition_loc, lightPositions_flattened);
-        gl.uniform4fv(gpu.lightColor_loc, lightColors_flattened);
-        gl.uniform1fv(gpu.attenuation_factor_loc, lightAttenuations_flattened);
-    }
-
-    // Helper function for sending matrices to GPU.
-    update_matrices(g_state, model_transform, gpu, gl) {
-        // (PCM will mean Projection * Camera * Model)
-        let [P,C,M] = [g_state.projection_transform, g_state.camera_transform, model_transform],
-            CM = C.times(M),
-            PCM = P.times(CM),
-            inv_CM = Mat4.inverse(CM).sub_block([0, 0], [3, 3]);
-
-        // Send the current matrices to the shader.  Go ahead and pre-compute
-        // the products we'll need of the of the three special matrices and just
-        // cache and send those.  They will be the same throughout this draw
-        // call, and thus across each instance of the vertex shader.
-        // Transpose them since the GPU expects matrices as column-major arrays.                                  
-        gl.uniformMatrix4fv(gpu.camera_transform_loc, false, Mat.flatten_2D_to_1D(C.transposed()));
-        gl.uniformMatrix4fv(gpu.camera_model_transform_loc, false, Mat.flatten_2D_to_1D(CM.transposed()));
-        gl.uniformMatrix4fv(gpu.projection_camera_model_transform_loc, false, Mat.flatten_2D_to_1D(PCM.transposed()));
-        gl.uniformMatrix3fv(gpu.inverse_transpose_modelview_loc, false, Mat.flatten_2D_to_1D(inv_CM));
     }
 }
+
+window.Fish_Are_Friends = window.classes.Fish_Are_Friends = Fish_Are_Friends;
