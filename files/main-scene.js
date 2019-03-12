@@ -28,47 +28,60 @@ var pos_in_curve = 0;
 var fish_idle = false;
 var fish_moving = true;
 var food_found = false;
+var caught = false;
+var in_process = false;
+var move_again = false;
 
 // instantaneous bools
 var fish_start_moving = false;
 
 // speed values
+var fish_wait_time = 8;
 var drop_speed = 0.01;
-var swim_speed = 1/1.2;
+var swim_speed = 1/1;
 var paddle_speed = 15;
 const low_speed = 5;
 const med_speed = 25;
 const high_speed = 30;
 
-
 // position values
 var fish_size = 0.5;
+var fish_max_size = 2.3;
+var fish_growth = 0.1;
 var start_height = 0;
+var fish_lower_limit = -2.6 / fish_size;
 
 
 
 
 
 
+/* FOOD CLICKING */
 
+var TREAT_MODE = false;
 
-/* MOUSE CLICK */
+var foods_list = [];
+var food_spawn_t = [];
+var global_t = 0;
 
-var trackobject = 0;
-var object_x_WCS = []; //default with origin
-var object_y_WCS = []; //default with origin
-var object_z_WCS = [];
+var food_size = 0.5;
+var food_max_num = 15;
+var food_lower_limit = -5.4;
+var food_drop_speed = 0.005;
 
 function onclick(screen_x, screen_y){
-//     trackobject++;
-//     console.log(screen_x);
-// //     x = Math.random() * 8;
-// //     y = Math.random() * 8;
-//     z = 0;
-//     object_x_WCS.push(screen_x/15);
-//     object_y_WCS.push(screen_y/-15);
-//     object_z_WCS.push(z);
+    if (foods_list.length >= food_max_num)
+        return;
+    if (!TREAT_MODE)
+        return;
+    
+    x = Math.random() * 16 - 8;
+    y = Math.random() * 9;
+    z = Math.random() * 8 - 4;
+    foods_list.push(Vec.of(x, y, z));
+    food_spawn_t.push(global_t);
 }
+
 
 
 
@@ -99,13 +112,7 @@ class Fish_Are_Friends extends Scene_Component {
         // multiple cubes.  Don't define more than one blueprint for the
         // same thing here.
         const shapes = {
-            'square': new Square(),
-            'circle': new Circle(15),
-            'pyramid': new Tetrahedron(false),
-            'simplebox': new SimpleCube(),
             'box': new Cube(),
-            'cylinder': new Cylinder(15),
-            'cone': new Cone(20),
             'ball': new Subdivision_Sphere(4),
 
             'body': new Body(),
@@ -223,6 +230,10 @@ class Fish_Are_Friends extends Scene_Component {
             }
             tracking = !tracking;
         });
+
+        this.key_triggered_button("Treat Mode", ["t"], () => {
+            TREAT_MODE = !TREAT_MODE;
+        });
     }
 
     // Mouse click
@@ -249,6 +260,7 @@ class Fish_Are_Friends extends Scene_Component {
         if (!this.paused)
             this.t += graphics_state.animation_delta_time / 1000;
         const t = this.t;
+        global_t = t;
         
         
         
@@ -261,40 +273,76 @@ class Fish_Are_Friends extends Scene_Component {
         const table_pos = -6;
         this.table(graphics_state, m_origin, table_pos, table_height, table_width, table_length, table_scale);
 
+        
+
+        start_height = 7 + table_scale*table_pos;
+        let center = m_origin.times(Mat4.translation(Vec.of(0, start_height, 0)));    
+
+
         // FOOD
 
-        this.food(graphics_state, m_origin);
+        this.food(graphics_state, center);
 
-        // FISH
-        
-        start_height = 7 + table_scale*table_pos;
-        let center = m_origin.times(Mat4.translation(Vec.of(0, start_height, 0)));
-        
+
+
+        // FISH    
+
+        // Start Fish position
         if (!setup_first_once_m_fish) {
             m_fish = center;
             setup_first_once_m_fish = true;
         }
-
+        
+        // If a food is placed in aquarium
         if (food_found) {
-            this.food_found();
-        }
-        else {
-            if (t % 10 < 0.1) {
-                this.new_goal(center);
+            if (in_process) {
+                m_old_pos = m_fish;
+                in_process = false;
+                fish_start_moving = false;
+            }
+            else if (!caught) {
+                this.food_movement(center);
                 fish_moving = true;
             }
+            else if (t % (fish_wait_time/4) < 0.1) {
+                caught = false;
+            }
+        }
+        else {
+            in_process = true;
+        }
 
-            else if (fish_moving) {
-                goal_direction = retVector(m_goal_pos).minus(retVector(m_old_pos));
-                m_fish = this.move_movement(center, t);
-            }
-            else {
-                this.idle_movement(t);
-            }
-        }        
+        
+        // Move to your goal
+        if (fish_moving) {
+            goal_direction = retVector(m_goal_pos).minus(retVector(m_old_pos));
+            m_fish = this.move_movement(center, swim_speed, t);
+        }
+        // Update your goal every 10 seconds
+        else if (!food_found && t % fish_wait_time < 0.1) {
+            this.new_goal(center);
+            fish_moving = true;
+        }
+        else {
+            // Idle
+            this.idle_movement(t);
+        }
+
+
+             
 
         let m_final = this.align_direction(t);
-        this.fish(graphics_state, m_final, t, fish_size, paddle_speed, false);
+
+        if (retVector(m_final)[1] < fish_lower_limit)
+            m_final[1][3] = fish_lower_limit;
+        
+        let special = false;
+        if (fish_size > 1)
+            special = true;
+        
+        this.fish(graphics_state, m_final, t, fish_size, paddle_speed, special);
+
+
 
         // CAMERA TRACKING
 
@@ -313,27 +361,25 @@ class Fish_Are_Friends extends Scene_Component {
 
     idle_movement(t) {
         
-        m_fish = m_fish.times(Mat4.translation(Vec.of(0, -1*drop_speed, 0)));
+        let water_oscill = 0.5 * Math.sin(t) * drop_speed;
 
-        if (retVector(m_fish)[1] < -4) {
-            if (t % 2 <= 1)
-                m_fish = m_fish.times(Mat4.translation(Vec.of(0, drop_speed, 0)));
-            else
-                m_fish = m_fish.times(Mat4.translation(Vec.of(0, -1*drop_speed, 0)));
+        if (retVector(m_fish)[1] > fish_lower_limit) {
+
+            m_fish = m_fish.times(Mat4.translation(Vec.of(0, -drop_speed - water_oscill, 0)));
         }
         
         m_old_pos = m_fish;
         paddle_speed = low_speed;
     }
 
-    move_movement(model_transform, t) {
+    move_movement(model_transform, local_speed, t) {
         if (!fish_start_moving) {
             fish_start_moving = true;
             move_start_time = t;
         }
 
         var local_time = t - move_start_time;
-        pos_in_curve = 1 - 0.5*(Math.cos(local_time*swim_speed) + 1);
+        pos_in_curve = 1 - 0.5*(Math.cos(local_time*local_speed) + 1);
         var m_midpoint = this.calculate_mid(m_old_pos, m_goal_pos);
 
         var P0 = retVector(m_old_pos);
@@ -345,8 +391,9 @@ class Fish_Are_Friends extends Scene_Component {
 
         let next_pos = A_pos.times(1-pos_in_curve).plus(B_pos.times(pos_in_curve));
 
-        if (pos_in_curve >= 0.95) {
+        if (local_time*swim_speed > Math.PI) {
             fish_moving = false;
+            move_again = false;
             fish_start_moving = false;
             m_old_pos = m_goal_pos;
         }
@@ -357,11 +404,25 @@ class Fish_Are_Friends extends Scene_Component {
     new_goal(model_transform) {
         var new_x = (Math.random() - 0.5) * 9.5;
         var new_y = (Math.random() - 0.5) * 6.5;
-        var new_z = (Math.random() - 0.5) * 4.5;
+        var new_z = (Math.random() - 0.5) * 4;
 
         m_goal_pos = model_transform.times(Mat4.translation(Vec.of(new_x, new_y, new_z)));
         paddle_speed = med_speed;
     }
+
+    food_movement(model_transform) {
+        if (foods_list.length > 0) {
+            m_goal_pos = model_transform.times(Mat4.translation(foods_list[0]));
+            paddle_speed = high_speed;
+        }
+    }
+
+
+
+
+
+
+    /* HELPER FUNCTIONS */
 
     calculate_mid() {
         let vec_p = retVector(m_old_pos);
@@ -397,11 +458,25 @@ class Fish_Are_Friends extends Scene_Component {
         return goal_direction[0] >= 0 ? true : false;
     }
 
-    food_found() {
-        // since you're interrupting normal movement behavior here,
-        // make sure to update old_pos here
+    collision_detector(model1, distance1, model2, distance2) {
+        let first = retVector(model1);
+        let second = retVector(model2);
+
+        let curr_dist = this.vector_point_distance(first, second);
+        let cmp = distance1 + distance2;
+
+        return (curr_dist < cmp);
     }
 
+    vector_point_distance(vec1, vec2) {
+        let x_dist_squared = (vec1[0] - vec2[0]) * (vec1[0] - vec2[0]);
+        let y_dist_squared = (vec1[1] - vec2[1]) * (vec1[1] - vec2[1]);
+        let z_dist_squared = (vec1[2] - vec2[2]) * (vec1[2] - vec2[2]);
+
+        let squared_sum = x_dist_squared + y_dist_squared + z_dist_squared;
+
+        return Math.sqrt(squared_sum);
+    }
 
 
 
@@ -440,22 +515,44 @@ class Fish_Are_Friends extends Scene_Component {
     }
 
 
-    food(graphics_state, model_transform) {
+    food(graphics_state, model_center) {
+        if (foods_list.length > 0)
+            food_found = true;
+        else
+            food_found = false;
+        
+        var i = 0;
+        while (i < foods_list.length) {
+            
+            let next_height = -food_drop_speed * (this.t - food_spawn_t[i]) / food_size;
+//             let next_vec = Vec.of(0, next_height, 0);
+            foods_list[i][1] = foods_list[i][1] + next_height;
 
-        ////////////////////////draw all objects, their coordinates are stored in the global variables on the top of this file
-        var i;
-        for(i = 0; i < object_x_WCS.length; i++){
-            let m = Mat4.translation(Vec.of(object_x_WCS[i], object_y_WCS[i], object_z_WCS[i]));
-            let transformMat = Mat4.translation(Vec.of(object_x_WCS[i], object_y_WCS[i], object_z_WCS[i]));
-            let WCS = transformMat.times( Vec.of(0,0,0).to4(1));
+            if (foods_list[i][1] < food_lower_limit) {
+                foods_list[i][1] = food_lower_limit;
+            }
+
+            let food_pos = model_center.times(Mat4.translation(foods_list[i]))
+                                        .times(Mat4.scale(Vec.of(food_size, food_size, food_size)));
+
+            if (this.collision_detector(food_pos, food_size, m_fish, fish_size)) {
+                foods_list.splice(i, 1);
+                food_spawn_t.splice(i, 1);
+                caught = true;
+                
+                if (fish_size < fish_max_size)
+                    fish_size += fish_growth;
+
+                continue;
+            }
+
             this.shapes.ball.draw(
-                graphics_state,
-                transformMat.times(Mat4.translation(Vec.of(0,15,0))),
-                this.shape_materials["fishfood"] || this.plastic
-           );
+                    graphics_state,
+                    food_pos,
+                    this.shape_materials["fishfood"] || this.plastic);
+            i++;
         }
     }
-
 
     fish(graphics_state, model_transform, t, size, speed, special) {
 
