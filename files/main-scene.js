@@ -49,7 +49,7 @@ var fish_size = 0.5;
 var fish_max_size = 2.3;
 var fish_growth = 0.1;
 var start_height = 0;
-var fish_lower_limit = -2.6 / fish_size;
+var fish_lower_limit = -1.3 / (fish_size*fish_size);
 
 
 
@@ -136,7 +136,7 @@ class Fish_Are_Friends extends Scene_Component {
             //specularity: 0    // l -> r gradient
         });
 
-		this.clay = context.get_instance(Phong_Shader2).material(Color.of(.2, .5, .1, 1), {
+		this.clay = context.get_instance(Phong_Shader).material(Color.of(.2, .5, .1, 1), {
             ambient: .4,
             diffusivity: .4,
             depthTest: false
@@ -263,9 +263,7 @@ class Fish_Are_Friends extends Scene_Component {
         global_t = t;
         
         
-        
         // TABLE
-        
         const table_height = 3;
         const table_width = 9;
         const table_length = 4;
@@ -273,20 +271,17 @@ class Fish_Are_Friends extends Scene_Component {
         const table_pos = -6;
         this.table(graphics_state, m_origin, table_pos, table_height, table_width, table_length, table_scale);
 
-        
 
+        // CENTER OF AQUARIUM
         start_height = 7 + table_scale*table_pos;
         let center = m_origin.times(Mat4.translation(Vec.of(0, start_height, 0)));    
 
 
         // FOOD
-
         this.food(graphics_state, center);
 
 
-
         // FISH    
-
         // Start Fish position
         if (!setup_first_once_m_fish) {
             m_fish = center;
@@ -327,8 +322,6 @@ class Fish_Are_Friends extends Scene_Component {
             // Idle
             this.idle_movement(t);
         }
-
-
              
 
         let m_final = this.align_direction(t);
@@ -343,12 +336,9 @@ class Fish_Are_Friends extends Scene_Component {
         this.fish(graphics_state, m_final, t, fish_size, paddle_speed, special);
 
 
-
         // CAMERA TRACKING
-
-        if (tracking) {
+        if (tracking)
             this.cameratrack(graphics_state, m_fish);
-        }
         if (camera_once)
             this.cameraorigin(graphics_state);
     }
@@ -360,11 +350,9 @@ class Fish_Are_Friends extends Scene_Component {
     /* MOVEMENT */
 
     idle_movement(t) {
-        
-        let water_oscill = 0.5 * Math.sin(t) * drop_speed;
+        let water_oscill = 0.3 * Math.sin(t) * drop_speed;
 
         if (retVector(m_fish)[1] > fish_lower_limit) {
-
             m_fish = m_fish.times(Mat4.translation(Vec.of(0, -drop_speed - water_oscill, 0)));
         }
         
@@ -401,15 +389,6 @@ class Fish_Are_Friends extends Scene_Component {
         return model_transform.times(Mat4.translation(next_pos));
     }
 
-    new_goal(model_transform) {
-        var new_x = (Math.random() - 0.5) * 9.5;
-        var new_y = (Math.random() - 0.5) * 6.5;
-        var new_z = (Math.random() - 0.5) * 4;
-
-        m_goal_pos = model_transform.times(Mat4.translation(Vec.of(new_x, new_y, new_z)));
-        paddle_speed = med_speed;
-    }
-
     food_movement(model_transform) {
         if (foods_list.length > 0) {
             m_goal_pos = model_transform.times(Mat4.translation(foods_list[0]));
@@ -424,6 +403,15 @@ class Fish_Are_Friends extends Scene_Component {
 
     /* HELPER FUNCTIONS */
 
+    new_goal(model_transform) {
+        var new_x = (Math.random() - 0.5) * 9.5;
+        var new_y = (Math.random() - 0.5) * 6.5;
+        var new_z = (Math.random() - 0.5) * 4;
+
+        m_goal_pos = model_transform.times(Mat4.translation(Vec.of(new_x, new_y, new_z)));
+        paddle_speed = med_speed;
+    }
+    
     calculate_mid() {
         let vec_p = retVector(m_old_pos);
         let vec_n = retVector(m_goal_pos);
@@ -454,10 +442,6 @@ class Fish_Are_Friends extends Scene_Component {
         
     }
 
-    facing_right() {
-        return goal_direction[0] >= 0 ? true : false;
-    }
-
     collision_detector(model1, distance1, model2, distance2) {
         let first = retVector(model1);
         let second = retVector(model2);
@@ -477,7 +461,6 @@ class Fish_Are_Friends extends Scene_Component {
 
         return Math.sqrt(squared_sum);
     }
-
 
 
 
@@ -506,14 +489,12 @@ class Fish_Are_Friends extends Scene_Component {
     }
 
     draw_legs(graphics_state, model_transform, x, y, height, width, length, scale){
-
          this.shapes['box'].draw(
                graphics_state,
                model_transform.times(Mat4.translation([x*(width-1.2), -height-0.2, y*(length-1.2)]))
                                 .times(Mat4.scale([1, height, 1])),
                this.shape_materials['table']);
     }
-
 
     food(graphics_state, model_center) {
         if (foods_list.length > 0)
@@ -525,7 +506,6 @@ class Fish_Are_Friends extends Scene_Component {
         while (i < foods_list.length) {
             
             let next_height = -food_drop_speed * (this.t - food_spawn_t[i]) / food_size;
-//             let next_vec = Vec.of(0, next_height, 0);
             foods_list[i][1] = foods_list[i][1] + next_height;
 
             if (foods_list[i][1] < food_lower_limit) {
